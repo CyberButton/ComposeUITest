@@ -5,9 +5,19 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,12 +28,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowRight
@@ -43,14 +54,19 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -71,24 +87,51 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreenContents(modifier: Modifier = Modifier) {
-    Scaffold(modifier = modifier,
-        topBar = { TopAppBarRow() },
-        bottomBar = { BottomAppBarRow() },
-        content = { innerPadding ->
-            Box(modifier = modifier.background(color = Color(0xFFF7F7F7))) {
+    var isInSearchMode by remember { mutableStateOf(false) }
+
+    Scaffold(modifier = modifier, topBar = {
+        TopAppBarRow(isInSearchMode = isInSearchMode,
+            setSearchMode = { newState -> isInSearchMode = newState })
+    }, bottomBar = {
+        AnimatedVisibility(visible = !isInSearchMode) {
+            BottomAppBarRow()
+        }
+    }, content = { innerPadding ->
+        Box(modifier = modifier.background(color = Color(0xFFF7F7F7))) {
+            AnimatedVisibility(
+                visible = !isInSearchMode, enter = fadeIn(), exit = fadeOut()
+            ) {
                 ShapeBackground()
                 Column(
                     modifier = Modifier
                         .padding(innerPadding)
                         .fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceBetween
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     BalanceSectionMainScreen()
                     TransferOptionsRow()
                     TransactionSheet()
                 }
             }
-        })
+            AnimatedVisibility(
+                visible = isInSearchMode,
+                enter = fadeIn() + slideInVertically(),
+                exit = fadeOut() + slideOutVertically()
+            ) {
+                BackgroundShapeForSearchMode()
+            }
+        }
+    })
+}
+
+@Composable
+fun BackgroundShapeForSearchMode(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(color = Color.LightGray, shape = RectangleShape)
+    )
 }
 
 @Composable
@@ -104,61 +147,149 @@ fun ShapeBackground(modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun TopAppBarRow(modifier: Modifier = Modifier) {
+fun TopAppBarRow(isInSearchMode: Boolean, setSearchMode: (Boolean) -> Unit) {
+    val width: Float by animateFloatAsState(if (isInSearchMode) 1f else 0.75f, label = "width")
     Row(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 18.dp)
+        modifier = Modifier.fillMaxWidth()
     ) {
-        Icon(
-            painter = painterResource(
-                id = R.drawable.trophy_star
-            ), tint = Color.White, contentDescription = "Trophy icon"
-        )
-        SearchBarMainScreen()
-        Icon(
-            imageVector = Icons.Default.Notifications,
-            tint = Color.White,
-            contentDescription = "Notification icon"
-        )
+        AnimatedVisibility(
+            visible = !isInSearchMode,
+            enter = slideInHorizontally(initialOffsetX = { -it }),
+            exit = slideOutHorizontally(targetOffsetX = { -it })
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.trophy_star),
+                tint = Color.White,
+                contentDescription = "Trophy icon"
+            )
+        }
+        Box(
+            modifier = Modifier
+                .padding(vertical = 12.dp)
+                .fillMaxWidth(width),
+            contentAlignment = Alignment.Center
+        ) {
+            SearchBarMainScreen(
+                isInSearchMode = isInSearchMode, setSearchMode = setSearchMode
+            )
+        }
+        AnimatedVisibility(
+            visible = !isInSearchMode,
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it })
+        ) {
+            Icon(
+                imageVector = Icons.Default.Notifications,
+                tint = Color.White,
+                contentDescription = "Notification icon",
+            )
+        }
     }
 }
 
+class NavigationItem(
+    val id: Int,
+    val iconUnselected: Int,
+    val iconSelected: Int,
+)
+
+val listOfNavigationItems = listOf(
+    NavigationItem(
+        id = 0, iconUnselected = R.drawable.home, iconSelected = R.drawable.home_filled
+    ), NavigationItem(
+        id = 1, iconUnselected = R.drawable.chart, iconSelected = R.drawable.chart_filled
+    ), NavigationItem(
+        id = 2, iconUnselected = R.drawable.scanner, iconSelected = R.drawable.scanner
+    ), NavigationItem(
+        id = 3, iconUnselected = R.drawable.chat, iconSelected = R.drawable.chat_filled
+    ), NavigationItem(
+        id = 4, iconUnselected = R.drawable.user, iconSelected = R.drawable.user_filled
+    )
+)
+
 @Composable
 fun BottomAppBarRow(modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier.padding(16.dp)
-    ) {
-        Row(
-            modifier = modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly
+    var selectedNavItemId by remember { mutableIntStateOf(0) }
+    Box(modifier = modifier.padding(12.dp)) {
+        Card(
+            colors = CardDefaults.cardColors().copy(containerColor = Color.White)
         ) {
-            HomeScreenSelectedNavItem()
-            Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account icon")
-            QrScannerNavItem()
-            Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account icon")
-            Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account icon")
+            Row(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .height(62.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                listOfNavigationItems.forEach { navItem ->
+                    NavItemBlock(navItem = navItem,
+                        isSelected = navItem.id == selectedNavItemId,
+                        onSelect = { selectedId -> selectedNavItemId = selectedId })
+                }
+            }
         }
     }
 }
 
 @Composable
-fun HomeScreenSelectedNavItem(modifier: Modifier = Modifier) {
-    Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account icon")
+fun NavItemBlock(
+    modifier: Modifier = Modifier,
+    isSelected: Boolean,
+    navItem: NavigationItem,
+    onSelect: (Int) -> Unit
+) {
+
+    AnimatedContent(targetState = isSelected, label = "NavItem Animation") { targetState ->
+        if (targetState) {
+            Column(
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Icon(
+                    painter = painterResource(id = navItem.iconSelected),
+                    tint = Color(0xFF304FFF),
+                    contentDescription = ""
+                )
+                Box(
+                    modifier = modifier
+                        .size(6.dp)
+                        .background(
+                            color = Color(0xFF304FFF), shape = CircleShape
+                        )
+                )
+            }
+        } else {
+            Icon(painter = painterResource(id = navItem.iconUnselected),
+                contentDescription = "",
+                modifier = modifier.clickable { onSelect(navItem.id) })
+        }
+    }
+
 }
 
 @Composable
-fun QrScannerNavItem(modifier: Modifier = Modifier) {
-    Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account icon")
-}
-
-@Composable
-fun SearchBarMainScreen(modifier: Modifier = Modifier) {
+fun SearchBarMainScreen(
+    modifier: Modifier = Modifier, isInSearchMode: Boolean, setSearchMode: (Boolean) -> Unit
+) {
     var text by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
 
-    TextField(
-        modifier = modifier.height(28.dp),
+    TextField(modifier = modifier
+        .onFocusChanged {
+            setSearchMode(it.isFocused)
+        }
+        .then(
+            if (isInSearchMode) {
+                Modifier
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth()
+            } else {
+                Modifier
+            }
+        ),
         value = text,
         onValueChange = { text = it },
         label = { Text(text = "Search \"Payments\"") },
@@ -169,9 +300,20 @@ fun SearchBarMainScreen(modifier: Modifier = Modifier) {
                 contentDescription = "Search icon"
             )
         },
+        trailingIcon = {
+            AnimatedVisibility(visible = isInSearchMode) {
+                Icon(
+                    tint = Color.White, modifier = modifier.clickable {
+                        focusManager.clearFocus()
+                    }, imageVector = Icons.Default.Close, contentDescription = "Close icon"
+                )
+            }
+        },
         shape = RoundedCornerShape(26.dp),
         colors = TextFieldDefaults.colors().copy(
+            focusedLabelColor = Color.White,
             unfocusedLabelColor = Color.White,
+            focusedContainerColor = Color(0xFF778BFE),
             unfocusedContainerColor = Color(0xFF778BFE)
         )
     )
@@ -251,23 +393,23 @@ fun AddMoneyButton(modifier: Modifier = Modifier) {
 @Composable
 fun TransferOptionsRow(modifier: Modifier = Modifier) {
     Card(
-        modifier = modifier.padding(16.dp),
+        modifier = modifier
+            .padding(16.dp)
+            .height(80.dp),
         colors = CardDefaults.cardColors().copy(containerColor = Color.White)
     ) {
-        Column(
-            modifier = modifier.padding(vertical = 12.dp)
+        Row(
+            modifier = modifier
+                .padding(top = 16.dp, bottom = 12.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TransferOptionSend()
-                VerticalDivider(modifier = modifier.height(30.dp))
-                TransferOptionRequest()
-                VerticalDivider(modifier = modifier.height(30.dp))
-                TransferOptionBank()
-            }
+            TransferOptionSend()
+            VerticalDivider(modifier = modifier.height(30.dp))
+            TransferOptionRequest()
+            VerticalDivider(modifier = modifier.height(30.dp))
+            TransferOptionBank()
         }
     }
 }
@@ -276,9 +418,12 @@ fun TransferOptionsRow(modifier: Modifier = Modifier) {
 fun TransferOptionSend(modifier: Modifier = Modifier) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.Send, tint = Color.Blue, contentDescription = "Send icon"
+            painter = painterResource(id = R.drawable.dollar_send_circle),
+            tint = Color.Blue,
+            contentDescription = "Send icon"
         )
         Text(text = "Send")
     }
@@ -288,9 +433,10 @@ fun TransferOptionSend(modifier: Modifier = Modifier) {
 fun TransferOptionRequest(modifier: Modifier = Modifier) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
-            imageVector = Icons.Default.ExitToApp,
+            painter = painterResource(id = R.drawable.dollar_receive_circle),
             tint = Color(0xFFF9A825),
             contentDescription = "Request icon"
         )
@@ -302,6 +448,7 @@ fun TransferOptionRequest(modifier: Modifier = Modifier) {
 fun TransferOptionBank(modifier: Modifier = Modifier) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Icon(
             painter = painterResource(id = R.drawable.bank),
@@ -381,15 +528,14 @@ fun TransactionsList(modifier: Modifier = Modifier) {
     )
 
     Box(modifier = modifier.padding(12.dp)) {
-
         Column(
             modifier = modifier
                 .fillMaxWidth()
                 .background(
                     color = Color.White, shape = RoundedCornerShape(12.dp)
-                ), horizontalAlignment = Alignment.CenterHorizontally
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-
             transactions.forEach { transaction ->
                 TransactionRow(
                     transactionTypeIcon = transaction.iconId,
@@ -399,7 +545,9 @@ fun TransactionsList(modifier: Modifier = Modifier) {
                     iconColor = transaction.iconColor,
                     iconBackgroundColor = transaction.iconBackgroundColor
                 )
-                HorizontalDivider(modifier = modifier.width(320.dp))
+                if (transaction.iconId != R.drawable.sack_dollar) {
+                    HorizontalDivider(modifier = modifier.width(340.dp))
+                }
             }
         }
     }
@@ -419,10 +567,14 @@ fun TransactionRow(
         modifier = modifier
             .padding(12.dp)
             .fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
         TransactionTypeBlock(
-            iconId = transactionTypeIcon, iconColor = iconColor, iconBackgroundColor = iconBackgroundColor, text = transactionTypeText
+            iconId = transactionTypeIcon,
+            iconColor = iconColor,
+            iconBackgroundColor = iconBackgroundColor,
+            text = transactionTypeText
         )
         TransactionFormattedAmountBlock(formattedSum = formattedSum, color = sumColor)
     }
@@ -430,13 +582,19 @@ fun TransactionRow(
 
 @Composable
 fun TransactionTypeBlock(
-    modifier: Modifier = Modifier, iconId: Int, iconColor: Color, iconBackgroundColor: Color, text: String
+    modifier: Modifier = Modifier,
+    iconId: Int,
+    iconColor: Color,
+    iconBackgroundColor: Color,
+    text: String
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        IconInShape(iconId = iconId, iconColor = iconColor, iconBackgroundColor = iconBackgroundColor)
+        IconInShape(
+            iconId = iconId, iconColor = iconColor, iconBackgroundColor = iconBackgroundColor
+        )
         Text(text = text, fontSize = 14.sp)
     }
 }
